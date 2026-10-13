@@ -94,13 +94,7 @@ class FlutterBannerAd extends FlutterAd implements FlutterAdLoadedListener {
     final List<AdSize> allSizes = new ArrayList<AdSize>();
     for (int i = 0; i < sizes.size(); i++) {
       FlutterAdSize flutterAdSize = sizes.get(i);
-      if (flutterAdSize.getAdSize().isFluid()) {
-        allSizes.add(AdSize.FLUID);
-        continue;
-      }
-      AdSize adSize =
-          new AdSize(flutterAdSize.getAdSize().getWidth(), flutterAdSize.getAdSize().getHeight());
-      allSizes.add(adSize);
+      allSizes.add(flutterAdSize.getAdSize());
     }
     BannerAdRequest adRequest = request.toBannerAdRequestBuilder(adUnitId, allSizes).build();
     adView.loadAd(
@@ -123,6 +117,7 @@ class FlutterBannerAd extends FlutterAd implements FlutterAdLoadedListener {
           @Override
           public void onAdFailedToLoad(@NonNull LoadAdError adError) {
             bannerAd = null;
+            manager.onAdFailedToLoad(adId, new FlutterAd.FlutterLoadAdError(adError));
           }
         });
   }
