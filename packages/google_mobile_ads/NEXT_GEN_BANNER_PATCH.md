@@ -93,3 +93,34 @@ In `packages/google_mobile_ads/android/src/adsNextGenSdk/java/io/flutter/plugins
 
 * **Before patch:** Banner load took 60s to 180s due to repeated NO FILL (code 3) and swallowed callbacks.
 * **After patch:** Anchored adaptive banners load on the initial attempt (`gen=1`) with fill latency of **~641ms**, matching native Android performance.
+
+
+## Follow-up correction — 2026-10-15
+
+The 641ms observation above is one successful request, not proof that the patch
+resolved production no fill. Build 2537 still reports AdMob-source `Internal error.`
+and Mintegral empty responses; the observed Home first fill came from Mintegral
+after 30,786ms. The root-cause wording above should be read as the motivation for
+the original size/callback fix, not a demonstrated cause of every no-fill result.
+
+The follow-up bridge correction preserves the existing adaptive size fix and:
+
+- Removes explicit `registerBannerAd()` after `AdView.loadAd()`. The SDK already
+  registers/resizes the banner before notifying success. An explicit registration
+  can cancel pending requests owned by `loadAd()`.
+- Forwards SDK refresh success/failure to Flutter, updating the current response
+  info and retaining a loaded banner when a refresh fails.
+- Executes view-related callbacks on the main looper, ignores obsolete callbacks
+  after disposal/replacement, and returns null for size before first fill.
+- Does not add another load call, timers, application retries, or SDK changes.
+
+Six focused Robolectric tests cover those lifecycle cases against Next-Gen 1.5.0.
+They validate the bridge, not production fill or physical-device rendering.
+The reproduction tests and incremental patch are kept in the Flutter app under
+`tool/ads/`; the investigation is in
+`docs/banner-production-followup-2026-10-15.md`.
+
+References:
+
+- https://developers.google.com/admob/android/next-gen/reference/com/google/android/libraries/ads/mobile/sdk/banner/AdView
+- https://developers.google.com/admob/android/next-gen/banner#listen_for_ad_events
