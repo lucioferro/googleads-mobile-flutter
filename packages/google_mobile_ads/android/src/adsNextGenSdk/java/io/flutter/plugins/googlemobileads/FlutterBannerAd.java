@@ -14,7 +14,8 @@
 
 package io.flutter.plugins.googlemobileads;
 
-import android.app.Activity;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -22,6 +23,7 @@ import com.google.android.libraries.ads.mobile.sdk.banner.AdSize;
 import com.google.android.libraries.ads.mobile.sdk.banner.AdView;
 import com.google.android.libraries.ads.mobile.sdk.banner.BannerAd;
 import com.google.android.libraries.ads.mobile.sdk.banner.BannerAdRequest;
+import com.google.android.libraries.ads.mobile.sdk.banner.BannerAdRefreshCallback;
 import com.google.android.libraries.ads.mobile.sdk.common.AdLoadCallback;
 import com.google.android.libraries.ads.mobile.sdk.common.LoadAdError;
 import io.flutter.plugin.platform.PlatformView;
@@ -91,16 +93,11 @@ class FlutterBannerAd extends FlutterAd implements FlutterAdLoadedListener {
   @Override
   void load() {
     adView = bannerAdCreator.createAdView();
+    final AdView requestedView = adView;
     final List<AdSize> allSizes = new ArrayList<AdSize>();
     for (int i = 0; i < sizes.size(); i++) {
       FlutterAdSize flutterAdSize = sizes.get(i);
-      if (flutterAdSize.getAdSize().isFluid()) {
-        allSizes.add(AdSize.FLUID);
-        continue;
-      }
-      AdSize adSize =
-          new AdSize(flutterAdSize.getAdSize().getWidth(), flutterAdSize.getAdSize().getHeight());
-      allSizes.add(adSize);
+      allSizes.add(flutterAdSize.getAdSize());
     }
     BannerAdRequest adRequest = request.toBannerAdRequestBuilder(adUnitId, allSizes).build();
     adView.loadAd(
@@ -108,23 +105,55 @@ class FlutterBannerAd extends FlutterAd implements FlutterAdLoadedListener {
         new AdLoadCallback<BannerAd>() {
           @Override
           public void onAdLoaded(@NonNull BannerAd ad) {
-            Activity activity = manager.getActivity();
-            if (activity == null) {
-              Log.e(TAG, "Tried to load banner ad before plugin is attached to an activity.");
-              return;
-            }
-            bannerAd = ad;
-            bannerAd.setAdEventCallback(
-                new FlutterBannerAdListener(adId, manager, FlutterBannerAd.this));
-            adView.registerBannerAd(bannerAd, activity);
-            FlutterBannerAd.this.onAdLoaded();
+            runForView(requestedView, () -> {
+              bannerAd = ad;
+              bannerAd.setAdEventCallback(
+                  new FlutterBannerAdListener(adId, manager, FlutterBannerAd.this));
+              bannerAd.setBannerAdRefreshCallback(new BannerAdRefreshCallback() {
+                @Override
+                public void onAdRefreshed() {
+                  runForView(requestedView, () -> {
+                    // AdView.loadAd() already registered and resized the new ad.
+                    BannerAd current = requestedView.getBannerAd();
+                    if (current != null) {
+                      bannerAd = current;
+                      current.setAdEventCallback(
+                          new FlutterBannerAdListener(adId, manager, FlutterBannerAd.this));
+                      current.setBannerAdRefreshCallback(this);
+                      FlutterBannerAd.this.onAdLoaded();
+                    }
+                  });
+                }
+
+                @Override
+                public void onAdFailedToRefresh(@NonNull LoadAdError error) {
+                  runForView(requestedView, () -> manager.onAdFailedToLoad(
+                      adId, new FlutterAd.FlutterLoadAdError(error)));
+                }
+              });
+              // Never register again: it cancels requests owned by AdView.loadAd().
+              FlutterBannerAd.this.onAdLoaded();
+            });
           }
 
           @Override
           public void onAdFailedToLoad(@NonNull LoadAdError adError) {
-            bannerAd = null;
+            runForView(requestedView, () -> manager.onAdFailedToLoad(
+                adId, new FlutterAd.FlutterLoadAdError(adError)));
           }
         });
+  }
+
+  /** Serializes callbacks with Flutter disposal and ignores obsolete views. */
+  private void runForView(@NonNull AdView expected, @NonNull Runnable callback) {
+    Runnable guarded = () -> {
+      if (adView == expected) callback.run();
+    };
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+      guarded.run();
+    } else {
+      new Handler(Looper.getMainLooper()).post(guarded);
+    }
   }
 
   @Nullable
@@ -138,21 +167,17 @@ class FlutterBannerAd extends FlutterAd implements FlutterAdLoadedListener {
 
   @Override
   void dispose() {
-    if (bannerAd != null) {
-      bannerAd = null;
-    }
-    if (adView != null) {
-      adView.destroy();
-    }
+    AdView releasedView = adView;
+    adView = null;
+    bannerAd = null;
+    if (releasedView != null) releasedView.destroy();
   }
 
   @Nullable
   FlutterAdSize getAdSize() {
-    if (adView == null || adView.getBannerAd().getAdSize() == null) {
-      return null;
-    }
-    return new FlutterAdSize(
-        adView.getBannerAd().getAdSize().getWidth(), adView.getBannerAd().getAdSize().getHeight());
+    BannerAd current = adView == null ? null : adView.getBannerAd();
+    if (current == null || current.getAdSize() == null) return null;
+    return new FlutterAdSize(current.getAdSize().getWidth(), current.getAdSize().getHeight());
   }
 
   boolean isCollapsible() {
