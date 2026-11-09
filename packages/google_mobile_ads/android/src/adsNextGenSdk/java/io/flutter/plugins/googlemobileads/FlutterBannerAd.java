@@ -97,6 +97,13 @@ class FlutterBannerAd extends FlutterAd implements FlutterAdLoadedListener {
     final List<AdSize> allSizes = new ArrayList<AdSize>();
     for (int i = 0; i < sizes.size(); i++) {
       FlutterAdSize flutterAdSize = sizes.get(i);
+      if (flutterAdSize.getAdSize().isFluid()) {
+        allSizes.add(AdSize.FLUID);
+        continue;
+      }
+      // Pass the original AdSize through. It was created with the SDK's adaptive factories and
+      // carries the anchored / inline / large anchored flags, which a copy made with
+      // `new AdSize(width, height)` would drop.
       allSizes.add(flutterAdSize.getAdSize());
     }
     BannerAdRequest adRequest = request.toBannerAdRequestBuilder(adUnitId, allSizes).build();
@@ -175,9 +182,14 @@ class FlutterBannerAd extends FlutterAd implements FlutterAdLoadedListener {
 
   @Nullable
   FlutterAdSize getAdSize() {
-    BannerAd current = adView == null ? null : adView.getBannerAd();
-    if (current == null || current.getAdSize() == null) return null;
-    return new FlutterAdSize(current.getAdSize().getWidth(), current.getAdSize().getHeight());
+    if (adView == null) {
+      return null;
+    }
+    final BannerAd loadedAd = adView.getBannerAd();
+    if (loadedAd == null || loadedAd.getAdSize() == null) {
+      return null;
+    }
+    return new FlutterAdSize(loadedAd.getAdSize());
   }
 
   boolean isCollapsible() {
