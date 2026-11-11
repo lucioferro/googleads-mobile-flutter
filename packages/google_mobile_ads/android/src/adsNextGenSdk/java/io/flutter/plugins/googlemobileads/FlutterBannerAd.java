@@ -145,8 +145,8 @@ class FlutterBannerAd extends FlutterAd implements FlutterAdLoadedListener {
 
           @Override
           public void onAdFailedToLoad(@NonNull LoadAdError adError) {
-            runForView(requestedView, () -> manager.onAdFailedToLoad(
-                adId, new FlutterAd.FlutterLoadAdError(adError)));
+            bannerAd = null;
+            manager.onAdFailedToLoad(adId, new FlutterAd.FlutterLoadAdError(adError));
           }
         });
   }
